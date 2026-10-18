@@ -55,7 +55,7 @@ internal class PhoneInputDialog(private val activity:MainActivity,private val en
   refresh.nextFocusRightId=close.id;refresh.nextFocusLeftId=refresh.id;close.nextFocusLeftId=refresh.id;close.nextFocusRightId=close.id
   listOf(refresh,close).forEach{it.nextFocusUpId=it.id;it.nextFocusDownId=it.id}
   setContentView(box);setCanceledOnTouchOutside(true)
-  setOnDismissListener{generation++;server?.close();server=null;handler.removeCallbacks(timer);starter.shutdown();if(entry.isAttachedToWindow)entry.requestFocus()}
+  setOnDismissListener{generation++;server?.close();server=null;handler.removeCallbacks(timer);starter.shutdown();if(entry.isAttachedToWindow&&activity.page=="settings")entry.requestFocus()}
  }
  override fun show(){super.show();window?.apply{setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT));setLayout(d(380),-1);setGravity(Gravity.RIGHT);addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);setDimAmount(.55f);decorView.systemUiVisibility=5894};refresh.requestFocus();startSession()}
  private fun d(value:Int)=activity.d(value)

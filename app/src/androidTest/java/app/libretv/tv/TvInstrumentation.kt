@@ -142,6 +142,7 @@ class TvInstrumentation:Instrumentation() {
   out.putString("qrFocus","PASS settings Down/Down, dialog Left/Right, Back restores entry; refresh rotates URL; background closes panel; closed URL rejected")
   // The host browser submits through the actual LAN endpoint while this test observes the TV.
   waitFor(240000){all(activity.window.decorView).filterIsInstance<EditText>().any{it.text.toString()==searchTerm}&&all(activity.window.decorView).filterIsInstance<Button>().any{it.text.contains(searchTerm)&&it.text.contains("资源")}}
+  waitFor(3000){(activity.currentFocus as? Button)?.text?.contains(searchTerm)==true}
   shot("phone-results");out.putString("phoneSearch","PASS LAN submission reached real search results: $searchTerm")
  }
 
