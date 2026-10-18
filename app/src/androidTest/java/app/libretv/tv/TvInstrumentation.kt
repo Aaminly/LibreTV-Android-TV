@@ -6,13 +6,16 @@ import android.view.*
 import android.widget.*
 import androidx.media3.exoplayer.ExoPlayer
 class TvInstrumentation:Instrumentation() {
+ private var raceOnly=false
+ private var phone=false
  private var playback=false
  private var searchTerm="流浪地球"
- override fun onCreate(arguments:Bundle?) {super.onCreate(arguments);playback=arguments?.getString("playback")=="true";searchTerm=arguments?.getString("query")?:"流浪地球";start()}
+ override fun onCreate(arguments:Bundle?) {super.onCreate(arguments);raceOnly=arguments?.getString("raceOnly")=="true";phone=arguments?.getString("phone")=="true";playback=arguments?.getString("playback")=="true";searchTerm=arguments?.getString("query")?:"流浪地球";start()}
  private fun all(v:View):List<View> = listOf(v)+if(v is ViewGroup)(0 until v.childCount).flatMap{all(v.getChildAt(it))}else emptyList()
  private fun waitFor(ms:Long=45000,condition:()->Boolean){val end=System.currentTimeMillis()+ms;while(System.currentTimeMillis()<end){var yes=false;runOnMainSync{yes=condition()};if(yes)return;Thread.sleep(200)};error("Timed out waiting for expected UI")}
  private fun shot(name:String){waitForIdleSync();Thread.sleep(350);val bitmap=uiAutomation.takeScreenshot()?:error("Screenshot unavailable");val f=java.io.File(targetContext.getExternalFilesDir(null),"qa-$name.png");f.outputStream().use{bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)};bitmap.recycle()}
  override fun onStart(){val out=Bundle();try{
+  if(phone){phoneTest(out);finish(0,out);return}
   val source=android.graphics.Bitmap.createBitmap(200,100,android.graphics.Bitmap.Config.ARGB_8888);val canvas=android.graphics.Canvas(source);canvas.drawColor(android.graphics.Color.GREEN);val paint=android.graphics.Paint();paint.color=android.graphics.Color.RED;canvas.drawRect(0f,0f,50f,100f,paint);paint.color=android.graphics.Color.BLUE;canvas.drawRect(150f,0f,200f,100f,paint)
   val target=android.graphics.Bitmap.createBitmap(60,90,android.graphics.Bitmap.Config.ARGB_8888);(Images::class.java.declaredMethods.first{it.name.startsWith("cover$")}.invoke(Images,source) as android.graphics.drawable.Drawable).apply{setBounds(0,0,60,90);draw(android.graphics.Canvas(target))};check(target.getPixel(1,45)==android.graphics.Color.GREEN&&target.getPixel(58,45)==android.graphics.Color.GREEN){"Cover must crop proportionally rather than stretch side stripes"};source.recycle();target.recycle();out.putString("coverCrop","PASS landscape image center crop preserves proportions")
   val isolated=object:android.content.ContextWrapper(targetContext){override fun getSharedPreferences(name:String,mode:Int)=super.getSharedPreferences("qa-"+name,mode)}
@@ -27,7 +30,7 @@ class TvInstrumentation:Instrumentation() {
   sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_RIGHT);runOnMainSync{check(activity.currentFocus!=null)}
   sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_LEFT)
   repeat(8){sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_DOWN)}
-  runOnMainSync{check((activity.currentFocus as? Button)?.text=="设置"){"Sidebar bottom wrapped"}}
+  runOnMainSync{check((activity.currentFocus as? Button)?.text=="扫码输入"){"Sidebar bottom wrapped"}}
   repeat(8){sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_UP)}
   runOnMainSync{check((activity.currentFocus as? Button)?.text=="首页"){"Sidebar top wrapped"}}
   sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_RIGHT)
@@ -95,4 +98,51 @@ class TvInstrumentation:Instrumentation() {
   }
   out.putString("focus","PASS exact sidebar direction targets and non-null content focus");finish(0,out)
  }catch(e:Throwable){out.putString("error",e.stackTraceToString());finish(1,out)}}
+ private fun phoneTest(out:Bundle){
+  val activity=startActivitySync(Intent(targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+  waitFor{activity.currentFocus!=null};Thread.sleep(5000)
+  runOnMainSync{all(activity.window.decorView).filterIsInstance<Button>().first{it.text=="设置"}.performClick()}
+  sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_RIGHT)
+  waitFor{activity.currentFocus is EditText}
+  sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_DOWN);runOnMainSync{check((activity.currentFocus as? Button)?.text=="检测并保存")}
+  sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_DOWN);runOnMainSync{check(activity.currentFocus?.contentDescription=="扫码输入")}
+  shot("phone-settings")
+  fun dialog():android.app.Dialog?{val f=MainActivity::class.java.getDeclaredField("phoneInput");f.isAccessible=true;return f.get(activity) as? android.app.Dialog}
+  fun url():String?{val d=dialog()?:return null;val f=d.javaClass.getDeclaredField("server");f.isAccessible=true;val server=f.get(d)?:return null;return server.javaClass.getMethod("getUrl").invoke(server) as String}
+  runOnMainSync{
+   all(activity.window.decorView).first{it.contentDescription=="扫码输入"}.performClick()
+   val opening=dialog()!!
+   val field=opening.javaClass.getDeclaredField("handler");field.isAccessible=true;val handler=field.get(opening) as android.os.Handler
+   opening.dismiss()
+   // Queue dismiss first, then hold main until the worker queues its ownership handoff.
+   val deadline=System.currentTimeMillis()+3000
+   while(!handler.hasMessages(0)&&System.currentTimeMillis()<deadline)Thread.sleep(10)
+   check(handler.hasMessages(0)){"Startup completion was not queued"}
+  }
+  waitFor(3000){Thread.getAllStackTraces().keys.none{it.name=="phone-input-listener"&&it.isAlive}}
+  out.putString("startupClose","PASS closing before startup callback leaves no listener");if(raceOnly)return
+  sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_CENTER);waitFor{url()!=null}
+  runOnMainSync{check((dialog()?.currentFocus as? Button)?.text=="刷新二维码")}
+  sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_RIGHT);runOnMainSync{check((dialog()?.currentFocus as? Button)?.text=="关闭")}
+  sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_LEFT)
+  shot("phone-qr")
+  android.util.Log.i("PhoneQA","open focus checked");val old=url()!!;sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+  waitFor{activity.currentFocus?.contentDescription=="扫码输入"}
+  val rejected=try{(java.net.URL(old).openConnection() as java.net.HttpURLConnection).apply{connectTimeout=2000;readTimeout=2000}.inputStream.close();false}catch(_:Exception){true}
+  check(rejected){"Closed panel still accepts connections"}
+  runOnMainSync{all(activity.window.decorView).filterIsInstance<Button>().first{it.text=="扫码输入"}.performClick()};waitFor{url()!=null&&url()!=old}
+  android.util.Log.i("PhoneQA","reopen checked");val beforeRefresh=url()!!;sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_CENTER);waitFor{url()!=null&&url()!=beforeRefresh}
+  val activeBeforePause=url()!!;android.util.Log.i("PhoneQA","refresh checked");targetContext.startActivity(Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+  waitFor{dialog()==null||dialog()?.isShowing==false}
+  val paused=try{(java.net.URL(activeBeforePause).openConnection() as java.net.HttpURLConnection).apply{connectTimeout=2000;readTimeout=2000}.inputStream.close();false}catch(_:Exception){true};check(paused)
+  android.util.Log.i("PhoneQA","background checked");targetContext.startActivity(Intent(targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+  waitFor{activity.hasWindowFocus()};sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_CENTER);waitFor{url()!=null}
+  android.util.Log.i("PhoneQA","foreground checked");val current=url()!!;java.io.File(targetContext.getExternalFilesDir(null),"phone-url.txt").writeText(current)
+  shot("phone-qr")
+  out.putString("qrFocus","PASS settings Down/Down, dialog Left/Right, Back restores entry; refresh rotates URL; background closes panel; closed URL rejected")
+  // The host browser submits through the actual LAN endpoint while this test observes the TV.
+  waitFor(240000){all(activity.window.decorView).filterIsInstance<EditText>().any{it.text.toString()==searchTerm}&&all(activity.window.decorView).filterIsInstance<Button>().any{it.text.contains(searchTerm)&&it.text.contains("资源")}}
+  shot("phone-results");out.putString("phoneSearch","PASS LAN submission reached real search results: $searchTerm")
+ }
+
 }
