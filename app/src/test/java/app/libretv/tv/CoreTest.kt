@@ -16,6 +16,11 @@ class CoreTest {
   assertEquals(0L, Core.position(-10, 100)); assertEquals(100L, Core.position(200,100))
   assertEquals(300L, Core.position(300,0))
  }
+ @Test fun unnamedEpisodesHaveDistinctLabels(){
+  assertEquals("第 1 集",Core.episodeLabel("https://media.test/one.m3u8",0))
+  assertEquals("第 2 集",Core.episodeLabel("https://media.test/two.m3u8",1))
+  assertEquals("特别篇",Core.episodeLabel("特别篇\$https://media.test/special.m3u8",2))
+ }
  @Test fun episodeParsing() {
   assertEquals("https://media.test/a.m3u8?x=1", Core.episode("第1集$" + "https://media.test/a.m3u8?x=1").second)
   assertEquals("第1集", Core.episode("第1集$" + "https://media.test/a.m3u8").first)

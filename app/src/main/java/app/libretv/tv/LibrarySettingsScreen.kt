@@ -41,13 +41,10 @@ internal fun MainActivity.settings(){
  val status=TvUi.label(this,"检测连接成功后才会保存新地址",16f).apply{setTextColor(TvUi.muted);maxLines=2}
  val save=TvUi.button(this,"检测并保存",true){val raw=input.text.toString();status.text="正在检测服务连接…";async({val candidate=LibreTvApi(raw);candidateApi=candidate;candidate to candidate.status()},{(candidate,list)->store.server=candidate.base;api=candidate;sources=list;results=emptyList();recommendations=emptyList();homeLoaded=false;status.text="连接成功 · ${list.size} 个视频源"},{status.text=it})}
  panel.addView(save,LinearLayout.LayoutParams(d(180),d(48)).apply{topMargin=d(12);bottomMargin=d(8)});panel.addView(status,LinearLayout.LayoutParams(-1,d(44)));box.addView(panel)
- val scan=TvUi.button(this,"扫码输入    ·    用手机输入片名，在电视上搜索"){}.apply{textSize=17f;gravity=Gravity.CENTER_VERTICAL;contentDescription="扫码输入"}
- scan.setOnClickListener{phoneInput=PhoneInputDialog(this,scan);phoneInput?.show()}
- box.addView(scan,LinearLayout.LayoutParams(-1,d(52)).apply{topMargin=d(16)})
- box.addView(TvUi.label(this,"LibreTV TV  1.2.0    ·    专为遥控器设计",13f).apply{setTextColor(TvUi.muted)},LinearLayout.LayoutParams(-1,d(28)).apply{topMargin=d(8)})
- input.id=View.generateViewId();save.id=View.generateViewId();scan.id=View.generateViewId()
- input.nextFocusDownId=save.id;save.nextFocusUpId=input.id;save.nextFocusDownId=scan.id;scan.nextFocusUpId=save.id;scan.nextFocusDownId=scan.id
- listOf(save,scan).forEach{button->button.setOnKeyListener{_,key,e->if(e.action==0&&key==KeyEvent.KEYCODE_DPAD_LEFT){navButtons[4].requestFocus();true}else false}}
+ box.addView(TvUi.label(this,"LibreTV TV  1.3.0    ·    专为遥控器设计",13f).apply{setTextColor(TvUi.muted)},LinearLayout.LayoutParams(-1,d(28)).apply{topMargin=d(8)})
+ input.id=View.generateViewId();save.id=View.generateViewId()
+ input.nextFocusDownId=save.id;save.nextFocusUpId=input.id;save.nextFocusDownId=save.id
+ save.setOnKeyListener{_,key,e->if(e.action==0&&key==KeyEvent.KEYCODE_DPAD_LEFT){navButtons[4].requestFocus();true}else false}
 
  input.setOnKeyListener{_,key,e->if(e.action!=0)false else when{key==KeyEvent.KEYCODE_DPAD_DOWN->{save.requestFocus();true};key==KeyEvent.KEYCODE_DPAD_LEFT&&input.selectionStart==0->{navButtons[4].requestFocus();true};else->false}}
  mainAction=input;input.requestFocus()

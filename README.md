@@ -16,7 +16,7 @@
 - Media3 播放、暂停、进度调整、下一集、换源与断点续播。
 - 按服务地址隔离的本机收藏与观看记录。
 - 服务连接检测、封面等比裁切与明确的加载状态。
-- 兔子电视图标；设置中的局域网扫码输入，手机提交片名后电视自动搜索。
+- 兔子电视图标；常驻二维码，手机搜索选片，电视播放，手机同步暂停、继续与拖动进度。
 
 ## 项目关系与运行条件
 
@@ -28,18 +28,19 @@
 - 服务要求鉴权但未提供本客户端支持的认证方式时会显示错误，不绕过服务端认证。
 - 封面、搜索与播放质量取决于服务端和来源；未保证所有厂商电视、格式或第三方服务可用。
 
-## 手机扫码输入（1.2.0）
+## 手机选片与遥控（1.3.0）
 
-1. 在电视左侧「设置」下方选择「扫码输入」，或打开设置页底部的同名入口。
-2. 用连接同一局域网的手机扫描右侧二维码，用浏览器打开。
-3. 输入影片名称，点击「在电视上搜索」，电视会自动进入搜索并展示真实结果。
+1. 在电视侧栏「设置」下方直接扫描二维码；也可用遥控器移到二维码，按确定放大。
+2. 手机与电视连接同一局域网，用浏览器打开二维码页面。
+3. 输入片名，搜索结果直接显示在手机上。点击单集影片即可请求电视播放；多集内容先在手机选集。
+4. 电视开始播放后，手机底部显示悬浮播放条：可暂停、继续、拖动进度，电视遥控器操作也会同步到手机。
 
-网页由电视自身临时提供，不需要电脑或额外云端服务。二维码五分钟有效、每次只接受一次搜索；关闭面板、离开应用或提交成功后，旧连接立即结束。再次输入时重新打开扫码入口即可。刷新会使旧二维码失效。关闭面板后，遥控焦点回到「扫码输入」。
+网页与遥控服务由电视应用自身提供，无需电脑或云端控制服务。应用前台期间可连续搜索和播放，跨搜索/播放页面保持连接；退出到其他应用后关闭连接，重新打开应用会生成新的二维码。手机页每秒读取一次真实状态，隐藏页面时停止轮询；网络断开会禁用控制并提示，旧影片的进度操作不会作用于新影片。
 
-<img src="docs/screenshots/phone-qr.png" alt="电视扫码输入面板" width="720" />
-<img src="docs/screenshots/phone-input.png" alt="手机输入页面" width="280" />
+<img src="docs/screenshots/remote-sidebar.jpg" alt="电视侧栏常驻二维码（模拟器）" width="720" />
+<img src="docs/screenshots/remote-phone.jpg" alt="手机搜索结果与播放控制" width="280" />
 
-手机与电视必须互通（电视可以使用同一路由器的网线连接）；访客 Wi-Fi、AP 隔离或 VPN 可能阻止访问。使用局域网 HTTP，随机会话令牌不代替传输加密，请在可信家庭网络使用。手机发送的片名由电视交给你配置的 LibreTV 服务执行搜索。当前没有互联网远程控制功能。
+手机与电视必须互通（电视可以用同一路由器的网线连接）；访客 Wi-Fi、AP 隔离或 VPN 可能阻止访问。使用局域网 HTTP 与随机会话令牌，请在可信家庭网络使用，不向公网转发端口。手机通过电视配置的 LibreTV 服务取得真实搜索结果与封面；影片播放能力取决于服务端来源。直播或不可跳转的媒体会禁用进度拖动。
 
 ## 构建
 
@@ -99,9 +100,9 @@ adb shell am instrument -w app.libretv.tv.test/app.libretv.tv.TvInstrumentation
 
 版本1.1.0已通过15项JVM测试，以及上述小米电视上的输入框边界、跨屏网格导航、封面裁切、焦点恢复、真实播放、下一集、快进和续播验证。此结果不代表所有电视与来源均已验证。
 
-版本 1.2.0 通过 19 项 JVM 测试与 Android Lint（0 错误，22 项非阻断警告）；同一小米电视实测局域网中文提交后返回真实搜索结果、二维码刷新、返回焦点、后台关闭连接和初始化时立即关闭的资源回收。Chrome 393×852 与 375×667 设备视口已检查，未替代实体手机相机和 Safari/微信验证。
+版本 1.3.0 的验证范围见 [验证记录](docs/remote-validation.md)。按用户要求，本次仅使用本地 Android 模拟器与浏览器，未操作、安装或验证已关机的实体电视。历史 1.1.0 真机结论不能替代新遥控功能的真机验收。
 
-扫码设备测试：`adb shell am instrument -w -e phone true -e query 疯狂动物城 app.libretv.tv.test/app.libretv.tv.TvInstrumentation`。测试会等待外部浏览器通过实际二维码页面提交该片名；连接地址临时写入应用外部文件目录 `phone-url.txt`，完成后应删除。`-e raceOnly true` 可只运行初始化关闭竞态检查。
+遥控集成测试：`adb -s 目标设备 shell am instrument -w -e remote true -e query 流浪地球 app.libretv.tv.test/app.libretv.tv.TvInstrumentation`。测试使用真实服务搜索和播放，并验证暂停、进度、反向状态、切换影片、后台关闭连接；仅应在测试设备运行。手机同步逻辑检查：`node tools/test-phone-ui.cjs`。
 
 ## 代码结构
 
@@ -110,7 +111,7 @@ adb shell am instrument -w app.libretv.tv.test/app.libretv.tv.TvInstrumentation
 - `PlaybackActivity.kt`：播放生命周期与遥控控制。
 - `LibreTvApi.kt`：服务接口；`WatchStore.kt`：本机记录；`FocusMemory.kt`：焦点恢复。
 - `Images.kt`：封面加载、裁切、缓存与体积限制。
-- `PhoneInputDialog.kt`、`LanInputServer.kt`、`assets/phone-input.html`：二维码面板、临时局域网服务与手机页面。
+- `RemoteControl.kt`、`RemoteQr.kt`、`LanInputServer.kt`、`assets/phone-input.html`：前台会话、二维码、LAN 协议与手机遥控页面。
 - `app/src/test`、`app/src/androidTest`：单元测试与电视设备测试。
 
 ## 个人测试用途与免责声明

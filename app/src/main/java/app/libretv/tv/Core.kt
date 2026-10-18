@@ -9,6 +9,7 @@ object Core {
  fun gridDown(index:Int,count:Int,columns:Int)=if(index/columns==(count-1)/columns)index else (index+columns).coerceAtMost(count-1)
  fun move(index:Int, delta:Int, count:Int)=if(count==0) -1 else (index+delta).coerceIn(0,count-1)
  fun position(value:Long,duration:Long)=if(duration>0) value.coerceIn(0,duration) else value.coerceAtLeast(0)
+ fun episodeLabel(raw:String,index:Int)=raw.substringBefore('$').takeIf{it.isNotBlank()&&!it.startsWith("http")}?:"第 ${index+1} 集"
  fun episode(raw:String):Pair<String,String> {
   val i=raw.indexOf('$');val name=if(i>=0)raw.substring(0,i) else "播放"
   val url=if(i>=0)raw.substring(i+1) else raw

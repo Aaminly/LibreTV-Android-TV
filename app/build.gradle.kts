@@ -3,7 +3,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 android {
  namespace = "app.libretv.tv"
  compileSdk = 36
- defaultConfig { applicationId = "app.libretv.tv"; minSdk = 23; targetSdk = 35; versionCode = 3; versionName = "1.2.0"; testInstrumentationRunner = "app.libretv.tv.TvInstrumentation" }
+ defaultConfig { applicationId = "app.libretv.tv"; minSdk = 23; targetSdk = 35; versionCode = 4; versionName = "1.3.0"; testInstrumentationRunner = "app.libretv.tv.TvInstrumentation" }
  val signingFile = rootProject.file(".signing/signing.properties")
  if (signingFile.exists()) {
   val props=Properties().apply { signingFile.inputStream().use { load(it) } }

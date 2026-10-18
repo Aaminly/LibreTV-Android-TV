@@ -6,16 +6,15 @@ import android.view.*
 import android.widget.*
 import androidx.media3.exoplayer.ExoPlayer
 class TvInstrumentation:Instrumentation() {
- private var raceOnly=false
- private var phone=false
+ private var remote=false
  private var playback=false
  private var searchTerm="流浪地球"
- override fun onCreate(arguments:Bundle?) {super.onCreate(arguments);raceOnly=arguments?.getString("raceOnly")=="true";phone=arguments?.getString("phone")=="true";playback=arguments?.getString("playback")=="true";searchTerm=arguments?.getString("query")?:"流浪地球";start()}
+ override fun onCreate(arguments:Bundle?) {super.onCreate(arguments);remote=arguments?.getString("remote")=="true";playback=arguments?.getString("playback")=="true";searchTerm=arguments?.getString("query")?:"流浪地球";start()}
  private fun all(v:View):List<View> = listOf(v)+if(v is ViewGroup)(0 until v.childCount).flatMap{all(v.getChildAt(it))}else emptyList()
  private fun waitFor(ms:Long=45000,condition:()->Boolean){val end=System.currentTimeMillis()+ms;while(System.currentTimeMillis()<end){var yes=false;runOnMainSync{yes=condition()};if(yes)return;Thread.sleep(200)};error("Timed out waiting for expected UI")}
- private fun shot(name:String){waitForIdleSync();Thread.sleep(350);val bitmap=uiAutomation.takeScreenshot()?:error("Screenshot unavailable");val f=java.io.File(targetContext.getExternalFilesDir(null),"qa-$name.png");f.outputStream().use{bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)};bitmap.recycle()}
+ private fun shot(name:String){Thread.sleep(350);val bitmap=uiAutomation.takeScreenshot()?:error("Screenshot unavailable");val f=java.io.File(targetContext.getExternalFilesDir(null),"qa-$name.png");f.outputStream().use{bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)};bitmap.recycle()}
  override fun onStart(){val out=Bundle();try{
-  if(phone){phoneTest(out);finish(0,out);return}
+  if(remote){remoteTest(out);finish(0,out);return}
   val source=android.graphics.Bitmap.createBitmap(200,100,android.graphics.Bitmap.Config.ARGB_8888);val canvas=android.graphics.Canvas(source);canvas.drawColor(android.graphics.Color.GREEN);val paint=android.graphics.Paint();paint.color=android.graphics.Color.RED;canvas.drawRect(0f,0f,50f,100f,paint);paint.color=android.graphics.Color.BLUE;canvas.drawRect(150f,0f,200f,100f,paint)
   val target=android.graphics.Bitmap.createBitmap(60,90,android.graphics.Bitmap.Config.ARGB_8888);(Images::class.java.declaredMethods.first{it.name.startsWith("cover$")}.invoke(Images,source) as android.graphics.drawable.Drawable).apply{setBounds(0,0,60,90);draw(android.graphics.Canvas(target))};check(target.getPixel(1,45)==android.graphics.Color.GREEN&&target.getPixel(58,45)==android.graphics.Color.GREEN){"Cover must crop proportionally rather than stretch side stripes"};source.recycle();target.recycle();out.putString("coverCrop","PASS landscape image center crop preserves proportions")
   val isolated=object:android.content.ContextWrapper(targetContext){override fun getSharedPreferences(name:String,mode:Int)=super.getSharedPreferences("qa-"+name,mode)}
@@ -30,7 +29,7 @@ class TvInstrumentation:Instrumentation() {
   sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_RIGHT);runOnMainSync{check(activity.currentFocus!=null)}
   sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_LEFT)
   repeat(8){sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_DOWN)}
-  runOnMainSync{check((activity.currentFocus as? Button)?.text=="扫码输入"){"Sidebar bottom wrapped"}}
+  runOnMainSync{check(activity.currentFocus?.contentDescription=="手机选片二维码"){"Sidebar bottom must reach QR"}}
   repeat(8){sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_UP)}
   runOnMainSync{check((activity.currentFocus as? Button)?.text=="首页"){"Sidebar top wrapped"}}
   sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_RIGHT)
@@ -98,52 +97,52 @@ class TvInstrumentation:Instrumentation() {
   }
   out.putString("focus","PASS exact sidebar direction targets and non-null content focus");finish(0,out)
  }catch(e:Throwable){out.putString("error",e.stackTraceToString());finish(1,out)}}
- private fun phoneTest(out:Bundle){
+ private fun remoteTest(out:Bundle){
   val activity=startActivitySync(Intent(targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
-  waitFor{activity.currentFocus!=null};Thread.sleep(5000)
-  runOnMainSync{all(activity.window.decorView).filterIsInstance<Button>().first{it.text=="设置"}.performClick()}
-  sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_RIGHT)
-  waitFor{activity.currentFocus is EditText}
-  sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_DOWN);runOnMainSync{check((activity.currentFocus as? Button)?.text=="检测并保存")}
-  sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_DOWN);runOnMainSync{check(activity.currentFocus?.contentDescription=="扫码输入")}
-  shot("phone-settings")
-  fun dialog():android.app.Dialog?{val f=MainActivity::class.java.getDeclaredField("phoneInput");f.isAccessible=true;return f.get(activity) as? android.app.Dialog}
-  fun url():String?{val d=dialog()?:return null;val f=d.javaClass.getDeclaredField("server");f.isAccessible=true;val server=f.get(d)?:return null;return server.javaClass.getMethod("getUrl").invoke(server) as String}
-  runOnMainSync{
-   all(activity.window.decorView).first{it.contentDescription=="扫码输入"}.performClick()
-   val opening=dialog()!!
-   val field=opening.javaClass.getDeclaredField("handler");field.isAccessible=true;val handler=field.get(opening) as android.os.Handler
-   opening.dismiss()
-   // Queue dismiss first, then hold main until the worker queues its ownership handoff.
-   val deadline=System.currentTimeMillis()+3000
-   while(!handler.hasMessages(0)&&System.currentTimeMillis()<deadline)Thread.sleep(10)
-   check(handler.hasMessages(0)){"Startup completion was not queued"}
+  val bridge=Class.forName("app.libretv.tv.RemoteControl");val instance=bridge.getField("INSTANCE").get(null)
+  fun url()=bridge.getMethod("getUrl").invoke(instance) as? String
+  waitFor{url()!=null};val endpoint=url()!!;java.io.File(targetContext.getExternalFilesDir(null),"remote-url.txt").writeText(endpoint)
+  fun api(path:String,body:org.json.JSONObject?=null):org.json.JSONObject{
+   val uri=java.net.URI(endpoint);val c=java.net.URL("http://${uri.authority}$path?${uri.rawQuery}").openConnection() as java.net.HttpURLConnection
+   c.connectTimeout=5000;c.readTimeout=60000
+   if(body!=null){c.requestMethod="POST";c.doOutput=true;c.setRequestProperty("Origin","http://${uri.authority}");c.setRequestProperty("Content-Type","application/json");c.outputStream.use{it.write(body.toString().toByteArray())}}
+   try{val code=c.responseCode;val text=(if(code==200)c.inputStream else c.errorStream).bufferedReader().use{it.readText()};check(code==200){"HTTP $code: $text"};return org.json.JSONObject(text)}finally{c.disconnect()}
   }
-  waitFor(3000){Thread.getAllStackTraces().keys.none{it.name=="phone-input-listener"&&it.isAlive}}
-  out.putString("startupClose","PASS closing before startup callback leaves no listener");if(raceOnly)return
-  sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_CENTER);waitFor{url()!=null}
-  runOnMainSync{check((dialog()?.currentFocus as? Button)?.text=="刷新二维码")}
-  sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_RIGHT);runOnMainSync{check((dialog()?.currentFocus as? Button)?.text=="关闭")}
-  sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_LEFT)
-  shot("phone-qr")
-  android.util.Log.i("PhoneQA","open focus checked");val old=url()!!;sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-  waitFor{activity.currentFocus?.contentDescription=="扫码输入"}
-  val rejected=try{(java.net.URL(old).openConnection() as java.net.HttpURLConnection).apply{connectTimeout=2000;readTimeout=2000}.inputStream.close();false}catch(_:Exception){true}
-  check(rejected){"Closed panel still accepts connections"}
-  runOnMainSync{all(activity.window.decorView).filterIsInstance<Button>().first{it.text=="扫码输入"}.performClick()};waitFor{url()!=null&&url()!=old}
-  android.util.Log.i("PhoneQA","reopen checked");val beforeRefresh=url()!!;sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_CENTER);waitFor{url()!=null&&url()!=beforeRefresh}
-  val activeBeforePause=url()!!;android.util.Log.i("PhoneQA","refresh checked");targetContext.startActivity(Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-  waitFor{dialog()==null||dialog()?.isShowing==false}
-  val paused=try{(java.net.URL(activeBeforePause).openConnection() as java.net.HttpURLConnection).apply{connectTimeout=2000;readTimeout=2000}.inputStream.close();false}catch(_:Exception){true};check(paused)
-  android.util.Log.i("PhoneQA","background checked");targetContext.startActivity(Intent(targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
-  waitFor{activity.hasWindowFocus()};sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_CENTER);waitFor{url()!=null}
-  android.util.Log.i("PhoneQA","foreground checked");val current=url()!!;java.io.File(targetContext.getExternalFilesDir(null),"phone-url.txt").writeText(current)
-  shot("phone-qr")
-  out.putString("qrFocus","PASS settings Down/Down, dialog Left/Right, Back restores entry; refresh rotates URL; background closes panel; closed URL rejected")
-  // The host browser submits through the actual LAN endpoint while this test observes the TV.
-  waitFor(240000){all(activity.window.decorView).filterIsInstance<EditText>().any{it.text.toString()==searchTerm}&&all(activity.window.decorView).filterIsInstance<Button>().any{it.text.contains(searchTerm)&&it.text.contains("资源")}}
-  waitFor(3000){(activity.currentFocus as? Button)?.text?.contains(searchTerm)==true}
-  shot("phone-results");out.putString("phoneSearch","PASS LAN submission reached real search results: $searchTerm")
+  runOnMainSync{all(activity.window.decorView).first{it.contentDescription=="手机选片二维码"}.requestFocus()};shot("remote-sidebar")
+  check(!api("/state").getBoolean("active"))
+  val results=api("/search",org.json.JSONObject().put("query",searchTerm)).getJSONArray("items");check(results.length()>0)
+  runOnMainSync{check(all(activity.window.decorView).filterIsInstance<EditText>().none{it.text.toString()==searchTerm}){"Phone search changed TV page"}}
+  val item=results.getJSONObject(0);val detail=api("/detail",org.json.JSONObject().put("id",item.getString("id")));check(detail.getJSONArray("episodes").length()>0)
+  val monitor=addMonitor(PlaybackActivity::class.java.name,null,false)
+  api("/play",org.json.JSONObject().put("id",item.getString("id")).put("episode",0))
+  val playback=waitForMonitorWithTimeout(monitor,15000) as? PlaybackActivity?:error("Remote play did not open player")
+  fun snapshot():org.json.JSONObject=api("/state")
+  fun awaitState(condition:(org.json.JSONObject)->Boolean):org.json.JSONObject{val end=System.currentTimeMillis()+90000;while(System.currentTimeMillis()<end){val value=snapshot();check(value.optString("error").isBlank()){value.optString("error")};if(condition(value))return value;Thread.sleep(500)};error("Remote state timed out")}
+  android.util.Log.i("RemoteQA","await initial playback");var state=awaitState{it.optBoolean("playing")&&it.optLong("duration")>60000&&it.optBoolean("seekable")};val media=state.getString("mediaId")
+  fun command(action:String,position:Long?=null)=api("/control",org.json.JSONObject().put("mediaId",media).put("action",action).apply{if(position!=null)put("position",position)})
+  android.util.Log.i("RemoteQA","pause");command("pause");state=awaitState{it.optBoolean("paused")};val paused=state.getLong("position");Thread.sleep(1000);check(kotlin.math.abs(snapshot().getLong("position")-paused)<1000)
+  android.util.Log.i("RemoteQA","seek");command("seek",30000);awaitState{kotlin.math.abs(it.optLong("position")-30000)<1500}
+  android.util.Log.i("RemoteQA","resume");command("play");awaitState{it.optBoolean("playing")&&it.optLong("position")>30500}
+  android.util.Log.i("RemoteQA","TV pause");sendKeyDownUpSync(KeyEvent.KEYCODE_MEDIA_PAUSE);awaitState{it.optBoolean("paused")}
+  android.util.Log.i("RemoteQA","TV resume");sendKeyDownUpSync(KeyEvent.KEYCODE_MEDIA_PLAY);awaitState{it.optBoolean("playing")}
+  android.util.Log.i("RemoteQA","capture playback");shot("remote-playback");out.putString("remotePlayback","PASS real search/detail/play; pause, seek 30s, resume; TV key state synchronized")
+  // A second selection keeps the same session and rejects a command from the old media.
+  runOnMainSync{
+   all(playback.window.decorView).filterIsInstance<Button>().first{it.text=="选集"}.performClick()
+   val df=PlaybackActivity::class.java.getDeclaredField("episodeDialog");df.isAccessible=true;val picker=df.get(playback) as android.app.Dialog;check(picker.isShowing)
+   val vf=PlaybackActivity::class.java.getDeclaredField("video");vf.isAccessible=true;val v=vf.get(playback) as Video
+   val method=PlaybackActivity::class.java.declaredMethods.first{it.name.startsWith("remoteOpen")}
+   method.invoke(playback,v,"http://127.0.0.1:9",0);check(!picker.isShowing){"Old episode picker survived film switch"}
+   val ef=PlaybackActivity::class.java.getDeclaredField("episodes");ef.isAccessible=true;check((ef.get(playback) as List<*>).isEmpty()){"Switching films retained old episodes"}
+  }
+  api("/play",org.json.JSONObject().put("id",item.getString("id")).put("episode",0));awaitState{it.optBoolean("playing")&&it.optString("mediaId")!=media}
+  var staleRejected=false;try{command("pause")}catch(e:IllegalStateException){staleRejected=e.message?.contains("409")==true};check(staleRejected)
+  runOnMainSync{playback.finish()};waitFor{activity.hasWindowFocus()};check(!snapshot().getBoolean("active"));check(url()==endpoint)
+  runOnMainSync{all(activity.window.decorView).first{it.contentDescription=="手机选片二维码"}.performClick()}
+  targetContext.startActivity(Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));Thread.sleep(1800)
+  var closed=false;try{snapshot()}catch(_:java.io.IOException){closed=true};check(closed)
+  targetContext.startActivity(Intent(targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));waitFor{url()!=null&&url()!=endpoint&&activity.hasWindowFocus()}
+  java.io.File(targetContext.getExternalFilesDir(null),"remote-url.txt").writeText(url()!!)
+  out.putString("remoteLifecycle","PASS session across activities; stale media rejected; background closes; foreground rotates token")
  }
-
 }
