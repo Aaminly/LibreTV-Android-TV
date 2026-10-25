@@ -17,6 +17,7 @@ import java.util.concurrent.Future
 import app.libretv.tv.MainActivity.TextHolder
 
 internal fun MainActivity.library(favorites:Boolean){
+ if(!ensureAccess())return
  reset(if(favorites)"favorites"else "history");val box=pageColumn(if(favorites)"我的收藏"else "观看记录")
  val items=(if(favorites)store.favorites()else store.history()).map{it.video}
  val header=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL}
@@ -31,17 +32,17 @@ internal fun MainActivity.library(favorites:Boolean){
  search.setOnKeyListener{_,key,e->if(e.action==0&&key==KeyEvent.KEYCODE_DPAD_DOWN&&items.isNotEmpty()){focusRow();true}else false};search.requestFocus()
 }
 
-internal fun MainActivity.settings(){
+internal fun MainActivity.settings(address:String=store.server){
  reset("settings");val box=pageColumn("设置")
  box.addView(TvUi.label(this,"连接你的影片服务",23f,true),LinearLayout.LayoutParams(-1,d(32)))
  box.addView(TvUi.label(this,"使用电视能够访问的 LibreTV 地址，观看记录与收藏保存在本机。",16f).apply{setTextColor(TvUi.muted)},LinearLayout.LayoutParams(-1,d(34)))
  val panel=TvUi.vertical(this).apply{setPadding(d(24),d(16),d(24),d(16));background=TvUi.shape(TvUi.surface)}
  panel.addView(TvUi.label(this,"服务地址",16f).apply{setTextColor(TvUi.muted)},LinearLayout.LayoutParams(-1,d(30)))
- val input=EditText(this).apply{setText(store.server);setSingleLine();textSize=20f;setTextColor(TvUi.text);inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI;imeOptions=android.view.inputmethod.EditorInfo.IME_ACTION_DONE;contentDescription="影片服务地址"};TvUi.focus(input);panel.addView(input,LinearLayout.LayoutParams(-1,d(56)))
+ val input=EditText(this).apply{setText(address);setSingleLine();textSize=20f;setTextColor(TvUi.text);inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI;imeOptions=android.view.inputmethod.EditorInfo.IME_ACTION_DONE;contentDescription="影片服务地址"};TvUi.focus(input);panel.addView(input,LinearLayout.LayoutParams(-1,d(56)))
  val status=TvUi.label(this,"检测连接成功后才会保存新地址",16f).apply{setTextColor(TvUi.muted);maxLines=2}
- val save=TvUi.button(this,"检测并保存",true){val raw=input.text.toString();status.text="正在检测服务连接…";async({val candidate=LibreTvApi(raw);candidateApi=candidate;candidate to candidate.status()},{(candidate,list)->store.server=candidate.base;api=candidate;sources=list;results=emptyList();recommendations=emptyList();homeLoaded=false;status.text="连接成功 · ${list.size} 个视频源"},{status.text=it})}
+ val save=TvUi.button(this,"检测并保存",true){checkService(input.text.toString())}
  panel.addView(save,LinearLayout.LayoutParams(d(180),d(48)).apply{topMargin=d(12);bottomMargin=d(8)});panel.addView(status,LinearLayout.LayoutParams(-1,d(44)));box.addView(panel)
- box.addView(TvUi.label(this,"LibreTV TV  1.3.0    ·    专为遥控器设计",13f).apply{setTextColor(TvUi.muted)},LinearLayout.LayoutParams(-1,d(28)).apply{topMargin=d(8)})
+ box.addView(TvUi.label(this,"LibreTV TV  1.4.0    ·    专为遥控器设计",13f).apply{setTextColor(TvUi.muted)},LinearLayout.LayoutParams(-1,d(28)).apply{topMargin=d(8)})
  input.id=View.generateViewId();save.id=View.generateViewId()
  input.nextFocusDownId=save.id;save.nextFocusUpId=input.id;save.nextFocusDownId=save.id
  save.setOnKeyListener{_,key,e->if(e.action==0&&key==KeyEvent.KEYCODE_DPAD_LEFT){navButtons[4].requestFocus();true}else false}

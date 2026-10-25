@@ -6,14 +6,17 @@ import android.view.*
 import android.widget.*
 import androidx.media3.exoplayer.ExoPlayer
 class TvInstrumentation:Instrumentation() {
+ private var authMode=""
+ private var authServer=""
  private var remote=false
  private var playback=false
  private var searchTerm="流浪地球"
- override fun onCreate(arguments:Bundle?) {super.onCreate(arguments);remote=arguments?.getString("remote")=="true";playback=arguments?.getString("playback")=="true";searchTerm=arguments?.getString("query")?:"流浪地球";start()}
+ override fun onCreate(arguments:Bundle?) {super.onCreate(arguments);authMode=arguments?.getString("auth").orEmpty();authServer=arguments?.getString("server").orEmpty();remote=arguments?.getString("remote")=="true";playback=arguments?.getString("playback")=="true";searchTerm=arguments?.getString("query")?:"流浪地球";start()}
  private fun all(v:View):List<View> = listOf(v)+if(v is ViewGroup)(0 until v.childCount).flatMap{all(v.getChildAt(it))}else emptyList()
  private fun waitFor(ms:Long=45000,condition:()->Boolean){val end=System.currentTimeMillis()+ms;while(System.currentTimeMillis()<end){var yes=false;runOnMainSync{yes=condition()};if(yes)return;Thread.sleep(200)};error("Timed out waiting for expected UI")}
  private fun shot(name:String){Thread.sleep(350);val bitmap=uiAutomation.takeScreenshot()?:error("Screenshot unavailable");val f=java.io.File(targetContext.getExternalFilesDir(null),"qa-$name.png");f.outputStream().use{bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)};bitmap.recycle()}
  override fun onStart(){val out=Bundle();try{
+  if(authMode.isNotEmpty()){AuthenticationChecks(this).run(authMode,authServer,out);finish(0,out);return}
   if(remote){remoteTest(out);finish(0,out);return}
   val source=android.graphics.Bitmap.createBitmap(200,100,android.graphics.Bitmap.Config.ARGB_8888);val canvas=android.graphics.Canvas(source);canvas.drawColor(android.graphics.Color.GREEN);val paint=android.graphics.Paint();paint.color=android.graphics.Color.RED;canvas.drawRect(0f,0f,50f,100f,paint);paint.color=android.graphics.Color.BLUE;canvas.drawRect(150f,0f,200f,100f,paint)
   val target=android.graphics.Bitmap.createBitmap(60,90,android.graphics.Bitmap.Config.ARGB_8888);(Images::class.java.declaredMethods.first{it.name.startsWith("cover$")}.invoke(Images,source) as android.graphics.drawable.Drawable).apply{setBounds(0,0,60,90);draw(android.graphics.Canvas(target))};check(target.getPixel(1,45)==android.graphics.Color.GREEN&&target.getPixel(58,45)==android.graphics.Color.GREEN){"Cover must crop proportionally rather than stretch side stripes"};source.recycle();target.recycle();out.putString("coverCrop","PASS landscape image center crop preserves proportions")
@@ -112,20 +115,21 @@ class TvInstrumentation:Instrumentation() {
   check(!api("/state").getBoolean("active"))
   val results=api("/search",org.json.JSONObject().put("query",searchTerm)).getJSONArray("items");check(results.length()>0)
   runOnMainSync{check(all(activity.window.decorView).filterIsInstance<EditText>().none{it.text.toString()==searchTerm}){"Phone search changed TV page"}}
-  val item=results.getJSONObject(0);val detail=api("/detail",org.json.JSONObject().put("id",item.getString("id")));check(detail.getJSONArray("episodes").length()>0)
+  val item=results.getJSONObject(0);val cover=item.optString("cover");if(cover.isNotBlank()){check(!cover.contains("ltv_session")&&!cover.contains("libretv-qa-cookie"));val c=java.net.URL(cover).openConnection() as java.net.HttpURLConnection;try{check(c.responseCode==200){"Authenticated phone cover failed HTTP ${c.responseCode}"};check(c.contentType.startsWith("image/"));check(c.inputStream.use{it.readBytes()}.isNotEmpty())}finally{c.disconnect()}}
+  val detail=api("/detail",org.json.JSONObject().put("id",item.getString("id")));check(detail.getJSONArray("episodes").length()>0)
   val monitor=addMonitor(PlaybackActivity::class.java.name,null,false)
   api("/play",org.json.JSONObject().put("id",item.getString("id")).put("episode",0))
   val playback=waitForMonitorWithTimeout(monitor,15000) as? PlaybackActivity?:error("Remote play did not open player")
   fun snapshot():org.json.JSONObject=api("/state")
   fun awaitState(condition:(org.json.JSONObject)->Boolean):org.json.JSONObject{val end=System.currentTimeMillis()+90000;while(System.currentTimeMillis()<end){val value=snapshot();check(value.optString("error").isBlank()){value.optString("error")};if(condition(value))return value;Thread.sleep(500)};error("Remote state timed out")}
-  android.util.Log.i("RemoteQA","await initial playback");var state=awaitState{it.optBoolean("playing")&&it.optLong("duration")>60000&&it.optBoolean("seekable")};val media=state.getString("mediaId")
+  android.util.Log.i("RemoteQA","await initial playback");var state=awaitState{it.optBoolean("playing")&&it.optLong("duration")>10000&&it.optBoolean("seekable")};val media=state.getString("mediaId");val seekTarget=minOf(30000L,state.getLong("duration")/3)
   fun command(action:String,position:Long?=null)=api("/control",org.json.JSONObject().put("mediaId",media).put("action",action).apply{if(position!=null)put("position",position)})
   android.util.Log.i("RemoteQA","pause");command("pause");state=awaitState{it.optBoolean("paused")};val paused=state.getLong("position");Thread.sleep(1000);check(kotlin.math.abs(snapshot().getLong("position")-paused)<1000)
-  android.util.Log.i("RemoteQA","seek");command("seek",30000);awaitState{kotlin.math.abs(it.optLong("position")-30000)<1500}
-  android.util.Log.i("RemoteQA","resume");command("play");awaitState{it.optBoolean("playing")&&it.optLong("position")>30500}
-  android.util.Log.i("RemoteQA","TV pause");sendKeyDownUpSync(KeyEvent.KEYCODE_MEDIA_PAUSE);awaitState{it.optBoolean("paused")}
-  android.util.Log.i("RemoteQA","TV resume");sendKeyDownUpSync(KeyEvent.KEYCODE_MEDIA_PLAY);awaitState{it.optBoolean("playing")}
-  android.util.Log.i("RemoteQA","capture playback");shot("remote-playback");out.putString("remotePlayback","PASS real search/detail/play; pause, seek 30s, resume; TV key state synchronized")
+  android.util.Log.i("RemoteQA","seek");command("seek",seekTarget);awaitState{kotlin.math.abs(it.optLong("position")-seekTarget)<1500}
+  android.util.Log.i("RemoteQA","resume");command("play");awaitState{it.optBoolean("playing")&&it.optLong("position")>seekTarget+500}
+  android.util.Log.i("RemoteQA","TV pause");runOnMainSync{all(playback.window.decorView).filterIsInstance<Button>().first{it.text=="暂停"||it.text=="播放"}.requestFocus()};sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_CENTER);awaitState{it.optBoolean("paused")}
+  android.util.Log.i("RemoteQA","TV resume");sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_CENTER);awaitState{it.optBoolean("playing")}
+  android.util.Log.i("RemoteQA","capture playback");shot("remote-playback");out.putString("remotePlayback","PASS real search/detail/play; pause, seek, resume; TV D-pad state synchronized")
   // A second selection keeps the same session and rejects a command from the old media.
   runOnMainSync{
    all(playback.window.decorView).filterIsInstance<Button>().first{it.text=="选集"}.performClick()

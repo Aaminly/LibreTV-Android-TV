@@ -16,9 +16,9 @@ import java.util.concurrent.Future
 
 import app.libretv.tv.MainActivity.TextHolder
 
-internal fun MainActivity.openDetail(v:Video){returnPage=page;detailVideo=v;renderDetail(v)}
+internal fun MainActivity.openDetail(v:Video){if(!ensureAccess())return;returnPage=page;detailVideo=v;renderDetail(v)}
 
-internal fun MainActivity.renderDetail(v:Video){reset("detail");val box=pageColumn(v.title);val status=TvUi.label(this,"正在获取剧集…",18f);box.addView(status);val back=TvUi.button(this,"返回"){backFromDetail()};box.addView(back);mainAction=back;back.requestFocus()
+internal fun MainActivity.renderDetail(v:Video){if(!ensureAccess())return;reset("detail");val box=pageColumn(v.title);val status=TvUi.label(this,"正在获取剧集…",18f);box.addView(status);val back=TvUi.button(this,"返回"){backFromDetail()};box.addView(back);mainAction=back;back.requestFocus()
   async({val current=sources.ifEmpty{api.status()};sources=current;api.detail(v,current)},{detail->
    val navFocus=navButtons.indexOf(currentFocus);box.removeView(status);box.removeView(back)
    val summary=LinearLayout(this)
@@ -28,7 +28,7 @@ internal fun MainActivity.renderDetail(v:Video){reset("detail");val box=pageColu
    summary.addView(info,LinearLayout.LayoutParams(0,d(124),1f).apply{leftMargin=d(22)});box.addView(summary,LinearLayout.LayoutParams(-1,d(124)).apply{bottomMargin=d(20)})
    val actions=LinearLayout(this);val history=store.history().find{it.video.key==v.key};val play=TvUi.button(this,if(history!=null)"继续观看"else "立即播放",true){val latest=store.history().find{it.video.key==v.key};play(v,latest?.episode?.coerceIn(0,detail.episodes.lastIndex)?:0,latest?.position?:0)}
    actions.addView(play,LinearLayout.LayoutParams(d(170),d(50)));mainAction=play
-   val favorite=TvUi.button(this,if(store.favorite(v))"取消收藏"else "收藏"){};favorite.setOnClickListener{favorite.text=if(store.toggle(v))"取消收藏"else "收藏"};actions.addView(favorite,LinearLayout.LayoutParams(d(130),d(50)).apply{leftMargin=d(16)})
+   val favorite=TvUi.button(this,if(store.favorite(v))"取消收藏"else "收藏"){};favorite.setOnClickListener{if(!ensureAccess())return@setOnClickListener;favorite.text=if(store.toggle(v))"取消收藏"else "收藏"};actions.addView(favorite,LinearLayout.LayoutParams(d(130),d(50)).apply{leftMargin=d(16)})
    actions.addView(TvUi.button(this,"更换来源"){query=v.title;searchScreen();runSearch()},LinearLayout.LayoutParams(d(140),d(50)).apply{leftMargin=d(16)});box.addView(actions)
    box.addView(TvUi.label(this,"选择剧集 · 共 ${detail.episodes.size} 集",20f,true),LinearLayout.LayoutParams(-1,d(48)))
    val episodes=RecyclerView(this).apply{layoutManager=androidx.recyclerview.widget.GridLayoutManager(this@renderDetail,4);clipToPadding=false;setPadding(d(4),d(4),d(4),d(4));itemAnimator=null}
@@ -40,6 +40,6 @@ internal fun MainActivity.renderDetail(v:Video){reset("detail");val box=pageColu
   },{e->showError(e){renderDetail(v)}})
  }
 
-internal fun MainActivity.play(v:Video,episode:Int,position:Long){startActivityForResult(Intent(this,PlaybackActivity::class.java).putExtra("video",v.json().toString()).putExtra("server",store.server).putExtra("episode",episode).putExtra("position",position),41)}
+internal fun MainActivity.play(v:Video,episode:Int,position:Long){if(!ensureAccess())return;startActivityForResult(Intent(this,PlaybackActivity::class.java).putExtra("video",v.json().toString()).putExtra("server",store.server).putExtra("episode",episode).putExtra("position",position),41)}
 
 internal fun MainActivity.backFromDetail(){when(returnPage){"search"->{searchScreen();focusRow(resultPosition)};"favorites"->{library(true);focusRow()};"history"->{library(false);focusRow()};else->{home();focusRow()}}}

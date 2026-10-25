@@ -15,6 +15,10 @@ import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
 class MainActivity:Activity() {
+ internal var authDialog:android.app.Dialog?=null
+ internal var authChecking=false
+ internal var resumed=false
+ internal val accessHandler=android.os.Handler(android.os.Looper.getMainLooper())
  internal lateinit var store:WatchStore
  internal lateinit var api:LibreTvApi
  internal lateinit var shell:FrameLayout
@@ -48,10 +52,10 @@ class MainActivity:Activity() {
  internal fun d(n:Int)=TvUi.dp(this,n)
  override fun onCreate(state:Bundle?) {
   super.onCreate(state);window.decorView.systemUiVisibility=5894;store=WatchStore(this);api=LibreTvApi(store.server)
-  query=state?.getString("query").orEmpty();buildShell();home()
+  query=state?.getString("query").orEmpty();buildShell();checkService()
  }
  override fun onSaveInstanceState(out:Bundle){out.putString("query",query);super.onSaveInstanceState(out)}
- override fun onResume(){super.onResume();RemoteControl.foreground(this);if(initialized&&page=="home")home();if(initialized&&page=="detail"){(mainAction as? Button)?.text=if(store.history().any{it.video.key==detailVideo?.key})"继续观看"else "立即播放"};initialized=true}
+ override fun onResume(){super.onResume();resumed=true;if(!AccessGate.allowed(store.server)){if(!authChecking&&authDialog==null&&page!="settings")checkService();initialized=true;return};scheduleAccessExpiry();RemoteControl.foreground(this);if(initialized&&page=="home")home();if(initialized&&page=="detail"){(mainAction as? Button)?.text=if(store.history().any{it.video.key==detailVideo?.key})"继续观看"else "立即播放"};initialized=true}
  internal fun buildShell(){
   shell=FrameLayout(this).apply{setBackgroundColor(TvUi.bg);clipChildren=false};setContentView(shell)
   content=FrameLayout(this).apply{clipChildren=false};shell.addView(content,FrameLayout.LayoutParams(-1,-1).apply{leftMargin=d(148)})
@@ -79,12 +83,12 @@ class MainActivity:Activity() {
   }
   remoteCard=RemoteQr(this);nav.addView(remoteCard,LinearLayout.LayoutParams(-1,d(132)).apply{topMargin=d(8)})
  }
- internal fun select(i:Int){section=i;when(i){0->home();1->searchScreen();2->library(true);3->library(false);4->settings()};navButtons[i].requestFocus()}
- internal fun reset(name:String){searchInput?.let{query=it.text.toString()};searchInput=null;gate.next();pending?.cancel(true);api.cancel();candidateApi?.cancel();loadingHome=false;lastContent=null;page=name;content.removeAllViews();row=null;rowItems=emptyList();mainAction=null;navButtons.forEachIndexed{i,v->(v as Button).setTextColor(if(i==section)TvUi.cyan else TvUi.text);v.compoundDrawableTintList=android.content.res.ColorStateList.valueOf(if(i==section)TvUi.cyan else TvUi.text);if(!v.hasFocus())v.background=TvUi.shape(if(i==section)TvUi.surface else TvUi.bg)}}
+ internal fun select(i:Int){if(!AccessGate.allowed(store.server)&&i!=4){if(authDialog==null&&!authChecking)checkService();return};section=i;when(i){0->home();1->searchScreen();2->library(true);3->library(false);4->settings()};navButtons[i].requestFocus()}
+ internal fun reset(name:String){searchInput?.let{query=it.text.toString()};searchInput=null;gate.next();pending?.cancel(true);api.cancel();candidateApi?.cancel();authChecking=false;loadingHome=false;lastContent=null;page=name;content.removeAllViews();row=null;rowItems=emptyList();mainAction=null;navButtons.forEachIndexed{i,v->(v as Button).setTextColor(if(i==section)TvUi.cyan else TvUi.text);v.compoundDrawableTintList=android.content.res.ColorStateList.valueOf(if(i==section)TvUi.cyan else TvUi.text);if(!v.hasFocus())v.background=TvUi.shape(if(i==section)TvUi.surface else TvUi.bg)}}
  internal fun connect(){if(loadingHome)return;loadingHome=true;async({val configured=api.status();configured to api.recommended()},{(configured,items)->sources=configured;recommendations=items;homeLoaded=true;loadingHome=false;home(false)},{error->loadingHome=false;showError(error){connect()}})}
  internal fun loadRecommendations(){if(page!="home")return;async({api.recommended()},{recommendations=it;home(false)},{e->showError(e){loadRecommendations()}})}
  internal fun <T> async(work:()->T,done:(T)->Unit,error:(String)->Unit={showError(it){select(section)}}){
-  val id=gate.next();pending?.cancel(true);pending=pool.submit{try{val value=work();runOnUiThread{if(!isDestroyed&&gate.current(id))done(value)}}catch(e:Exception){if(!Thread.currentThread().isInterrupted)runOnUiThread{if(!isDestroyed&&gate.current(id))error(e.message?:"连接失败")}}}
+  val id=gate.next();pending?.cancel(true);pending=pool.submit{try{val value=work();runOnUiThread{if(!isDestroyed&&gate.current(id))done(value)}}catch(e:Exception){if(!Thread.currentThread().isInterrupted)runOnUiThread{if(!isDestroyed&&gate.current(id))if(e is LoginRequired)loginRequired(e)else error(e.message?:"连接失败")}}}
  }
  internal fun frame(view:View,w:Int,h:Int,x:Int,y:Int){content.addView(view,FrameLayout.LayoutParams(if(w<0)w else d(w),if(h<0)h else d(h)).apply{leftMargin=d(x);topMargin=d(y)})}
 
@@ -109,7 +113,7 @@ class MainActivity:Activity() {
   content.addView(panel,FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM).apply{setMargins(d(28),0,d(32),d(32))});mainAction=b;b.requestFocus()
  }
 
- @Deprecated("TV legacy back handling") override fun onBackPressed(){when(page){"detail"->backFromDetail();"home"->if(currentFocus !in navButtons)navButtons[0].requestFocus()else super.onBackPressed();else->{section=0;home()}}}
- override fun onPause(){remoteCard.dismissPreview();RemoteControl.background(this);super.onPause()}
- override fun onDestroy(){gate.next();pending?.cancel(true);api.cancel();candidateApi?.cancel();pool.shutdownNow();super.onDestroy()}
+ @Deprecated("TV legacy back handling") override fun onBackPressed(){if(!AccessGate.allowed(store.server)){finish();return};when(page){"detail"->backFromDetail();"home"->if(currentFocus !in navButtons)navButtons[0].requestFocus()else super.onBackPressed();else->{section=0;home()}}}
+ override fun onPause(){resumed=false;accessHandler.removeCallbacksAndMessages(null);remoteCard.dismissPreview();RemoteControl.background(this);super.onPause()}
+ override fun onDestroy(){accessHandler.removeCallbacksAndMessages(null);authDialog?.dismiss();gate.next();pending?.cancel(true);api.cancel();candidateApi?.cancel();pool.shutdownNow();super.onDestroy()}
 }

@@ -3,6 +3,10 @@ import android.content.Context
 import org.json.JSONArray
 class WatchStore(context:Context) {
  private val prefs=context.getSharedPreferences("libretv",Context.MODE_PRIVATE)
+ companion object {private val restored=java.util.Collections.newSetFromMap(java.util.IdentityHashMap<android.content.SharedPreferences,Boolean>())}
+ init {SessionCookies.install();if(synchronized(restored){restored.add(prefs)})prefs.all.filterKeys{it.startsWith("session:")}.forEach{(key,value)->val base=key.removePrefix("session:");try{SessionCookies.commit(base,SiteSession.read(value as? String?:""))}catch(_:IllegalArgumentException){/* Ignore invalid saved addresses. */}}}
+ internal fun connected(api:LibreTvApi){val editor=prefs.edit().putString("server",api.base);val key="session:${SessionCookies.key(api.base)}";prefs.all.keys.filter{it.startsWith("session:")&&it!=key}.forEach{old->try{if(SessionCookies.key(old.removePrefix("session:"))==SessionCookies.key(api.base))editor.remove(old)}catch(_:IllegalArgumentException){}};val session=api.session;if(session!=null&&session.expires>0)editor.putString(key,session.json().toString())else editor.remove(key);check(editor.commit()){"无法保存登录会话，请重试"};SessionCookies.commit(api.base,session)}
+ internal fun clearSession(base:String){prefs.edit().remove("session:${SessionCookies.key(base)}").apply();SessionCookies.commit(base,null)}
  var server:String
   get()=prefs.getString("server","http://192.168.31.1:8899")!!
   set(v){prefs.edit().putString("server",Core.server(v)).apply()}

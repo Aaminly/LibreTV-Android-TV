@@ -16,7 +16,7 @@ import java.util.concurrent.Future
 
 import app.libretv.tv.MainActivity.TextHolder
 
-internal fun MainActivity.searchScreen(){section=1;reset("search");val box=pageColumn("搜索影片")
+internal fun MainActivity.searchScreen(){if(!ensureAccess())return;section=1;reset("search");val box=pageColumn("搜索影片")
   box.addView(TvUi.label(this,"输入片名，搜索所有已连接的视频源",16f).apply{setTextColor(TvUi.muted)},LinearLayout.LayoutParams(-1,d(36)));val line=LinearLayout(this);val input=EditText(this).apply{setSingleLine();setText(query);hint="输入影片名称";textSize=20f;setTextColor(TvUi.text);setHintTextColor(TvUi.muted);background=TvUi.shape(TvUi.surface);setPadding(d(16),0,d(16),0);imeOptions=android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH;contentDescription="影片名称"}
   TvUi.focus(input);searchInput=input;input.addTextChangedListener(object:android.text.TextWatcher{override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){};override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){query=s.toString()};override fun afterTextChanged(s:android.text.Editable?){} });line.addView(input,LinearLayout.LayoutParams(0,d(52),1f));val button=TvUi.button(this,"搜索",true){query=input.text.toString().trim();(getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(input.windowToken,0);runSearch()};button.contentDescription="执行影片搜索";line.addView(button,LinearLayout.LayoutParams(d(112),d(52)).apply{leftMargin=d(16)});box.addView(line);mainAction=input
   input.setOnEditorActionListener{_,_,_->button.performClick();true};input.setOnKeyListener{_,k,e->if(e.action!=0)false else when{k==KeyEvent.KEYCODE_DPAD_LEFT&&input.selectionStart==0->{navButtons[1].requestFocus();true};k==KeyEvent.KEYCODE_DPAD_RIGHT&&input.selectionStart==input.length()->{button.requestFocus();true};k==KeyEvent.KEYCODE_DPAD_DOWN&&results.isNotEmpty()->{focusRow();true};else->false}}
@@ -36,6 +36,7 @@ internal fun MainActivity.resultList(items:List<Video>):RecyclerView {
  }
 
 internal fun MainActivity.runSearch(){
+  if(!ensureAccess())return
   if(query.isBlank()){Toast.makeText(this,"请输入影片名称",Toast.LENGTH_SHORT).show();return}
   reset("search");val box=pageColumn("搜索：$query");val cancel=TvUi.button(this,"修改搜索"){searchScreen()};box.addView(cancel,LinearLayout.LayoutParams(d(160),d(48)).apply{bottomMargin=d(24)});mainAction=cancel;cancel.requestFocus();val status=TvUi.label(this,"正在搜索各个视频源…",18f).apply{setTextColor(TvUi.muted);setPadding(d(24),d(24),d(24),d(24));background=TvUi.shape(TvUi.surface)};box.addView(status)
   async({val current=sources.ifEmpty{api.status()};sources=current;api.search(query,current)},{(items,failed)->val navFocus=navButtons.indexOf(currentFocus);results=items;searchScreen();if(navFocus>=0)navButtons[navFocus].requestFocus()else if(items.isNotEmpty())focusRow(0)else showError("未找到相关影片${if(failed>0)"，$failed 个来源请求失败" else ""}"){searchScreen()};if(failed>0&&items.isNotEmpty())Toast.makeText(this,"$failed 个来源请求失败，已显示其余结果",Toast.LENGTH_LONG).show()},{e->showError(e){runSearch()}})

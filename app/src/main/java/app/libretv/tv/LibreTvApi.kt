@@ -6,21 +6,27 @@ import java.net.URL
 import java.net.URLEncoder
 class LibreTvApi(raw:String) {
  val base=Core.server(raw)
+ internal var session=SessionCookies.session(base)
+  private set
  private val connections=java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<HttpURLConnection,Boolean>())
  fun cancel(){connections.forEach{it.disconnect()};connections.clear()}
- fun request(path:String,body:JSONObject?=null):JSONObject {
+ fun request(path:String,body:JSONObject?=null):JSONObject = SessionCookies.using(base,session) {
   check(!Thread.currentThread().isInterrupted){"请求已取消"}
   val c=URL(base+path).openConnection() as HttpURLConnection
-  connections.add(c);c.connectTimeout=10000;c.readTimeout=25000;c.setRequestProperty("Accept","application/json")
+  connections.add(c);c.instanceFollowRedirects=false;c.connectTimeout=10000;c.readTimeout=25000;c.setRequestProperty("Accept","application/json")
   try {
    if(body!=null){c.requestMethod="POST";c.doOutput=true;c.setRequestProperty("Content-Type","application/json");c.outputStream.use{it.write(body.toString().toByteArray())}}
    val code=c.responseCode; val text=(if(code in 200..299)c.inputStream else c.errorStream)?.bufferedReader()?.use{it.readText()}.orEmpty()
+   check(code !in 300..399){"服务地址发生重定向，请填写最终的 HTTP 或 HTTPS 地址"}
+   if(code==401&&path!="/api/auth")throw LoginRequired(base,session?.token)
    val j=try{JSONObject(text)}catch(e:Exception){throw IllegalStateException("服务返回了无效数据（HTTP $code）",e)}
    check(code in 200..299 && !j.has("error")){j.optString("error","请求失败 HTTP $code")}
-   return j
+   if(path=="/api/auth"){check(j.optBoolean("success")){"登录未成功"};val received=SiteSession.from(SessionCookies.received().ifEmpty{c.headerFields},base)?:error("服务未返回登录会话");check(!received.secure||base.startsWith("https://")){"此站点要求 HTTPS 登录，请使用 HTTPS 服务地址"};session=received}
+   j
   }finally{connections.remove(c);c.disconnect()}
  }
- fun status():List<Source> { val j=request("/api/status");check(!j.optBoolean("passwordRequired")||j.optBoolean("verified")){"服务要求登录，请在服务端配置访问方式"};return j.getJSONArray("defaultSources").objects().map(Source::from) }
+ fun status():List<Source> { val j=request("/api/status");if(j.optBoolean("passwordRequired")&&!j.optBoolean("verified"))throw LoginRequired(base,session?.token);check(j.optBoolean("verified")){"服务器未配置 PASSWORD 环境变量，请联系部署者设置网页访问密码"};return j.getJSONArray("defaultSources").objects().map(Source::from) }
+ fun login(password:String):List<Source>{session=null;request("/api/auth",JSONObject().put("password",password));return status()}
  fun search(query:String,sources:List<Source>):Pair<List<Video>,Int> {
   require(query.isNotBlank() && query.length<=100){"请输入 1–100 字的片名"};require(sources.isNotEmpty()){"服务未配置点播源"}
   val j=request("/api/search",JSONObject().put("wd",query).put("sources",JSONArray(sources.map{it.json()})).put("filterAdult",true))

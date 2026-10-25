@@ -17,5 +17,7 @@ class ApiContractTest {
  @Test fun errorsAreNotSuccessfulEmptyResults(){serve(502,"""{"error":"源不可用"}"""){api->try{api.request("/api/test");fail()}catch(e:IllegalStateException){assertEquals("源不可用",e.message)}}}
  @Test fun malformedJsonIsExplicit(){serve(200,"<html>bad</html>"){api->try{api.request("/api/test");fail()}catch(e:IllegalStateException){assertTrue(e.message!!.contains("无效数据"))}}}
  @Test fun loginRequirementIsExplicit(){serve(200,"""{"passwordRequired":true,"verified":false}"""){api->try{api.status();fail()}catch(e:IllegalStateException){assertTrue(e.message!!.contains("登录"))}}}
+ @Test fun missingServerPasswordIsNotAnOpenServer(){serve(200,"""{"passwordRequired":false,"verified":false,"defaultSources":[]}"""){api->try{api.status();fail("Unconfigured server was accepted")}catch(e:IllegalStateException){assertTrue(e.message!!.contains("PASSWORD"))}}}
+ @Test fun explicitlyOpenServerIsAccepted(){serve(200,"""{"passwordRequired":false,"verified":true,"defaultSources":[]}"""){api->assertTrue(api.status().isEmpty())}}
  @Test fun partialSourceFailureRetained(){serve(200,"""{"list":[{"vodId":"1","name":"电影","sourceKey":"s"}],"failures":[{"sourceKey":"bad","error":"timeout"}]}"""){api->val (list,count)=api.search("电影",listOf(Source("s","源","https://source.test")));assertEquals(1,list.size);assertEquals(1,count)}}
 }

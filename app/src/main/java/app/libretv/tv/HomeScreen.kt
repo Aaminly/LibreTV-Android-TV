@@ -17,6 +17,7 @@ import java.util.concurrent.Future
 import app.libretv.tv.MainActivity.TextHolder
 
 internal fun MainActivity.home(focus:Boolean=true){
+  if(!ensureAccess())return
   val wasNav=navButtons.indexOf(currentFocus);reset("home")
   val history=store.history();val items=if(history.isNotEmpty())history.map{it.video}else recommendations
   val hero=items.firstOrNull();val image=ImageView(this).apply{scaleType=ImageView.ScaleType.CENTER_CROP;cropToPadding=true;background=TvUi.shape(TvUi.surface);clipToOutline=true};frame(image,210,286,534,32)

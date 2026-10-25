@@ -31,4 +31,11 @@ class LanInputServerTest {
  @Test fun rejectedCommandIsNotReportedAsSuccess(){server{_,_->error("电视已切换影片")}.use{s->val r=request(s,"/control","{\"action\":\"play\",\"mediaId\":\"old\"}");assertEquals(409,r.first);assertTrue(r.second.contains("电视已切换影片"))}}
  @Test fun closingSessionStopsConnections(){val s=server();s.close();try{request(s);fail("listener still open")}catch(_:java.io.IOException){}}
  @Test fun unknownRoutesAndInvalidSelectionAreRejected(){server().use{s->assertEquals(404,request(s,"/unknown").first);assertEquals(400,request(s,"/play","{\"id\":\"x\",\"episode\":-1}").first)}}
+ @Test fun phoneCoverRequiresTokenAndNeverExposesAnArbitraryUrl(){server().use{s->
+  s.image={id->require(id=="selected-id");byteArrayOf(1,2,3) to "image/png"}
+  assertEquals(403,request(s,"/cover/selected-id",token="wrong").first)
+  assertEquals(200,request(s,"/cover/selected-id").first)
+  assertEquals(400,request(s,"/cover/http%3A%2F%2Fevil.test").first)
+ }}
+
 }

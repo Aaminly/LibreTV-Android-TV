@@ -19,6 +19,8 @@ internal class LanInputServer(
  private val workers=ThreadPoolExecutor(4,4,0,TimeUnit.SECONDS,ArrayBlockingQueue(8))
  val origin="http://${address.hostAddress}:${listener.localPort}"
  val url="$origin/?token=$token"
+ @Volatile var image:((String)->Pair<ByteArray,String>)?=null
+ fun cover(id:String)="$origin/cover/$id?token=$token"
  init {
   Thread({
    while(!closed.get())try {
@@ -46,6 +48,7 @@ internal class LanInputServer(
    when {
     request[0]=="GET"&&route.path=="/"->respond(socket,200,html.replace("__TOKEN__",token),"text/html; charset=utf-8")
     request[0]=="GET"&&route.path=="/icon.png"->respondBytes(socket,200,icon,"image/png")
+    request[0]=="GET"&&route.path.startsWith("/cover/")->{val id=route.path.removePrefix("/cover/");require(id.matches(Regex("[a-zA-Z0-9-]{1,80}"))){"封面标识无效"};val (bytes,type)=(image?:error("封面连接未就绪"))(id);respondBytes(socket,200,bytes,type)}
     request[0]=="GET"&&route.path=="/state"->respond(socket,200,action("/state",JSONObject()).toString(),"application/json; charset=utf-8")
     request[0]=="POST"&&route.path in listOf("/search","/detail","/play","/control")->{
      if(headers["origin"]!=origin){respond(socket,403,"请求来源无效");return}

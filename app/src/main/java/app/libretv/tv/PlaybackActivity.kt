@@ -42,11 +42,13 @@ class PlaybackActivity:Activity() {
  private val pool=Executors.newSingleThreadExecutor()
  private val handler=Handler(Looper.getMainLooper())
  private val update=object:Runnable{override fun run(){val p=player;if(p!=null){val duration=p.duration.coerceAtLeast(0);if(!progress.isPressed)progress.progress=if(duration>0)(p.currentPosition*1000/duration).toInt()else 0;clock.text="${time(p.currentPosition)} / ${time(duration)}";pause.text=if(p.isPlaying)"暂停"else "播放"};handler.postDelayed(this,1000)}}
- private val saveTick=object:Runnable{override fun run(){save();handler.postDelayed(this,10000)}}
+ private val saveTick=object:Runnable{override fun run(){if(::api.isInitialized&&!AccessGate.allowed(api.base)){loginRequired(LoginRequired(api.base,api.session?.token));return};save();handler.postDelayed(this,10000)}}
+ private val accessExpired=Runnable{if(foreground&&::api.isInitialized&&!AccessGate.allowed(api.base))loginRequired(LoginRequired(api.base,api.session?.token))}
+ private fun scheduleAccessExpiry(){handler.removeCallbacks(accessExpired);val expires=if(::api.isInitialized)api.session?.expires?:return else return;if(foreground&&expires>0)handler.postDelayed(accessExpired,(expires-System.currentTimeMillis()).coerceAtLeast(1))}
  private val hide=Runnable{if(player?.isPlaying==true)controls.visibility=View.GONE}
  private fun d(n:Int)=TvUi.dp(this,n)
  override fun onCreate(state:Bundle?){super.onCreate(state);window.decorView.systemUiVisibility=5894;window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-  store=WatchStore(this);api=LibreTvApi(intent.getStringExtra("server")?:store.server);video=Video.from(JSONObject(intent.getStringExtra("video")!!));episode=state?.getInt("episode")?:intent.getIntExtra("episode",0);resume=state?.getLong("position")?:intent.getLongExtra("position",0)
+  store=WatchStore(this);if(!AccessGate.allowed(intent.getStringExtra("server")?:store.server)){setResult(RESULT_CANCELED);finish();return};api=LibreTvApi(intent.getStringExtra("server")?:store.server);video=Video.from(JSONObject(intent.getStringExtra("video")!!));episode=state?.getInt("episode")?:intent.getIntExtra("episode",0);resume=state?.getLong("position")?:intent.getLongExtra("position",0)
   root=FrameLayout(this).apply{setBackgroundColor(Color.BLACK)};setContentView(root)
   playerView=PlayerView(this).apply{useController=false;isFocusable=false};root.addView(playerView,FrameLayout.LayoutParams(-1,-1))
   status=TvUi.label(this,"正在准备播放…",20f).apply{gravity=Gravity.CENTER;setBackgroundColor(0xBB09111C.toInt())};root.addView(status,FrameLayout.LayoutParams(-1,d(80),Gravity.CENTER))
@@ -62,7 +64,7 @@ class PlaybackActivity:Activity() {
   list.forEachIndexed{i,b->buttons.addView(b,LinearLayout.LayoutParams(d(140),d(50)).apply{rightMargin=d(14)});b.setOnKeyListener{_,key,e->if(e.action!=0)false else when{key==KeyEvent.KEYCODE_DPAD_UP->{progress.requestFocus();true};key==KeyEvent.KEYCODE_DPAD_DOWN->true;key==KeyEvent.KEYCODE_DPAD_LEFT&&i==0->true;key==KeyEvent.KEYCODE_DPAD_RIGHT&&i==list.lastIndex->true;else->false}}}
   pause.requestFocus();handler.post(update);handler.post(saveTick);load()
  }
- private fun load(){val token=++generation;val client=api;val selected=video;status.visibility=View.VISIBLE;status.text="正在获取播放地址…";pool.execute{try{if(!alive||token!=generation)return@execute;val sources=client.status();val detail=client.detail(selected,sources);runOnUiThread{if(alive&&token==generation){episodes=detail.episodes;episode=episode.coerceIn(0,episodes.lastIndex);prepare()}}}catch(e:Exception){runOnUiThread{if(alive&&token==generation)error(e.message?:"获取资源失败")}}}}
+ private fun load(){val token=++generation;val client=api;val selected=video;status.visibility=View.VISIBLE;status.text="正在获取播放地址…";pool.execute{try{if(!alive||token!=generation)return@execute;val sources=client.status();val detail=client.detail(selected,sources);runOnUiThread{if(alive&&token==generation){episodes=detail.episodes;episode=episode.coerceIn(0,episodes.lastIndex);prepare()}}}catch(e:Exception){runOnUiThread{if(alive&&token==generation)if(e is LoginRequired)loginRequired(e)else error(e.message?:"获取资源失败")}}}}
  private fun prepare(){
   mediaId=java.util.UUID.randomUUID().toString();playbackError=""
   player?.release();player=null;ready=false
@@ -70,12 +72,16 @@ class PlaybackActivity:Activity() {
    val p=ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(http)).build();player=p;playerView.player=p
    p.addListener(object:Player.Listener{
     override fun onPlaybackStateChanged(state:Int){if(state==Player.STATE_READY){ready=true;status.visibility=View.GONE;android.util.Log.i("LibreTVPlayback","READY episode=$episode duration=${p.duration}")}else if(state==Player.STATE_BUFFERING){status.text="正在缓冲…";status.visibility=View.VISIBLE}else if(state==Player.STATE_ENDED){save();if(episode<episodes.lastIndex){episode++;resume=0;prepare()}else showControls()}}
-    override fun onPlayerError(e:PlaybackException){error("播放失败：${e.errorCodeName}。可重试或返回详情换源")}
+    override fun onPlayerError(e:PlaybackException){if(generateSequence<Throwable>(e){it.cause}.any{it is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException&&it.responseCode==401}){mediaUnauthorized("播放失败：${e.errorCodeName}。可重试或返回详情换源");return};error("播放失败：${e.errorCodeName}。可重试或返回详情换源")}
     override fun onRenderedFirstFrame(){android.util.Log.i("LibreTVPlayback","FIRST_FRAME episode=$episode")}
    })
    val item=MediaItem.Builder().setUri(api.proxy(raw)).apply{if(raw.contains(".m3u8",true))setMimeType(MimeTypes.APPLICATION_M3U8)}.build()
    p.setMediaItem(item);p.seekTo(resume);p.prepare();p.playWhenReady=foreground;showControls()
   }catch(e:Exception){error(e.message?:"无法播放该资源")}
+ }
+ private fun mediaUnauthorized(message:String){
+  val token=generation;val media=mediaId;val client=api;status.text="正在验证访问权限…";status.visibility=View.VISIBLE
+  pool.execute{try{client.status();runOnUiThread{if(alive&&token==generation&&media==mediaId)error(message)}}catch(e:Exception){runOnUiThread{if(alive&&token==generation&&media==mediaId){if(e is LoginRequired)loginRequired(e)else error(e.message?:message)}}}}
  }
  private fun error(s:String){playbackError=s;status.text=s;status.visibility=View.VISIBLE;showControls();pause.requestFocus();android.util.Log.e("LibreTVPlayback",s)}
  private fun chooseEpisode(){
@@ -105,6 +111,7 @@ class PlaybackActivity:Activity() {
   if(e.keyCode in listOf(19,20,21,22,23))showControls()
   };return super.dispatchKeyEvent(e)
  }
+ internal fun loginRequired(error:LoginRequired){if(error.base!=api.base)return;if(!AccessGate.reject(error)&&AccessGate.allowed(api.base))return;save();player?.stop();store.clearSession(error.base);RemoteControl.lock();setResult(RESULT_CANCELED);finish()}
  internal fun remoteState():JSONObject {
   val p=player;return JSONObject().put("active",true).put("mediaId",mediaId).put("title",video.title).put("source",video.sourceName).put("episode",episode+1)
    .put("position",p?.currentPosition?.coerceAtLeast(0)?:0).put("duration",p?.duration?.coerceAtLeast(0)?:0)
@@ -119,14 +126,14 @@ class PlaybackActivity:Activity() {
  }
  internal fun remoteOpen(selected:Video,base:String,index:Int){
   save();generation++;episodeDialog?.dismiss();episodes=emptyList();api.cancel();player?.release();player=null;ready=false;playbackError="";mediaId=java.util.UUID.randomUUID().toString()
-  video=selected;api=LibreTvApi(base);episode=index;resume=0;title.text=video.title
+  video=selected;api=LibreTvApi(base);scheduleAccessExpiry();episode=index;resume=0;title.text=video.title
   intent.putExtra("video",video.json().toString()).putExtra("server",base).putExtra("episode",index).putExtra("position",0L);load()
  }
  private fun save(){val p=player?:return;if(ready){resume=p.currentPosition;store.save(WatchRecord(api.base,video,episode,resume,p.duration.coerceAtLeast(0)))}}
  private fun time(ms:Long):String {val s=ms.coerceAtLeast(0)/1000;return "%02d:%02d".format(s/60,s%60)}
- override fun onResume(){super.onResume();foreground=true;RemoteControl.foreground(this)}
- override fun onPause(){RemoteControl.background(this);foreground=false;save();player?.pause();super.onPause()}
+ override fun onResume(){super.onResume();foreground=true;if(!::api.isInitialized)return;if(!AccessGate.allowed(api.base)){loginRequired(LoginRequired(api.base,api.session?.token));return};scheduleAccessExpiry();RemoteControl.foreground(this)}
+ override fun onPause(){handler.removeCallbacks(accessExpired);RemoteControl.background(this);foreground=false;save();player?.pause();super.onPause()}
  override fun onSaveInstanceState(out:Bundle){save();out.putInt("episode",episode);out.putLong("position",resume);super.onSaveInstanceState(out)}
  @Deprecated("TV back") override fun onBackPressed(){if(controls.visibility==View.VISIBLE){controls.visibility=View.GONE}else{save();super.onBackPressed()}}
- override fun onDestroy(){alive=false;episodeDialog?.dismiss();generation++;handler.removeCallbacksAndMessages(null);api.cancel();pool.shutdownNow();playerView.player=null;player?.release();super.onDestroy()}
+ override fun onDestroy(){alive=false;episodeDialog?.dismiss();generation++;handler.removeCallbacksAndMessages(null);if(::api.isInitialized)api.cancel();pool.shutdownNow();if(::playerView.isInitialized)playerView.player=null;player?.release();super.onDestroy()}
 }
