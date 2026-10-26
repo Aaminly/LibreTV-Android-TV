@@ -133,6 +133,14 @@ adb shell am instrument -w app.libretv.tv.test/app.libretv.tv.TvInstrumentation
 5. 发现与本项目相关的权利或安全问题，可通过仓库 Issues 联系维护者，并提供必要的可核查信息。请勿公开提交密钥、密码或个人敏感数据。
 6. 上述“个人学习、研究与测试”描述维护目的和使用倡议，不修改、缩减或替代开源许可证授予的权利；许可及责任条款以 [LICENSE](LICENSE) 与适用法律为准。
 
+## 打赏支持
+
+如果这个客户端帮你省了时间，可以请我喝杯咖啡 —— **不影响任何功能。**
+
+| 微信 | 支付宝 |
+| :---: | :---: |
+| <img src="docs/donate/wechat.jpg" alt="微信打赏收款码" width="300" /> | <img src="docs/donate/alipay.jpg" alt="支付宝打赏收款码" width="300" /> |
+
 ## 许可与致谢
 
 项目沿用 GNU Affero General Public License v3.0，完整文本见 [LICENSE](LICENSE)。LibreTV 名称和上游项目归各自权利人所有；本项目与上游不存在官方背书关系。
